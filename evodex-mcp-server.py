@@ -12,23 +12,16 @@ This server wraps the EVODEX evaluation package and provides tools for:
 """
 
 import asyncio
-import json
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import (
-    CallToolRequest,
     CallToolResult,
-    ListToolsRequest,
-    ListToolsResult,
     Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
 )
 
 # EVODEX imports
@@ -103,8 +96,6 @@ class EVODEXEvaluator:
         Returns:
             ReactionResult object with comprehensive evaluation
         """
-        self.logger.info(f"Comprehensive evaluation of reaction: {reaction}")
-
         # Get EVODEX-F assignment
         f_id = self.assign_evodex_f(reaction)
 
@@ -269,7 +260,6 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResu
 
         # Format comprehensive result
         result_text = f"""
-EVODEX Reaction Evaluation Results
 ================================
 
 Reaction: {result.reaction}
@@ -278,17 +268,14 @@ Matched Operators ({operator_type}): {result.matched_operators if result.matched
 Is Plausible: {result.is_plausible}
 Confidence: {result.confidence}
 
-Interpretation:
--- EVODEX-F ID indicates known formula change patterns
--- Matched operators indicate specific mechanistic patterns
--- Higher confidence when both methods find matches
+================================
 """
 
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": result_text.strip()
+                    "text": result_text
                 }
             ]
         }
