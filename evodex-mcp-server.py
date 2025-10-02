@@ -231,14 +231,14 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResu
 
         result = evaluator.assign_evodex_f(reaction)
 
-        return CallToolResult.model_validate({
+        return {
             "content": [
                 {
                     "type": "text",
                     "text": f"EVODEX-F ID: {result if result else 'No match found'}\n\nReaction: {reaction}"
                 }
             ]
-        })
+        }
 
     if name == "match_operators":
         reaction = arguments.get("reaction")
@@ -249,14 +249,14 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResu
 
         result = evaluator.match_operators(reaction, operator_type)
 
-        return CallToolResult.model_validate({
+        return {
             "content": [
                 {
                     "type": "text",
                     "text": f"Matched Operators ({operator_type}): {result if result else 'No matches found'}\n\nReaction: {reaction}"
                 }
             ]
-        })
+        }
 
     if name == "evaluate_reaction":
         reaction = arguments.get("reaction")
@@ -284,14 +284,14 @@ Interpretation:
 -- Higher confidence when both methods find matches
 """
 
-        return CallToolResult.model_validate({
+        return {
             "content": [
                 {
                     "type": "text",
                     "text": result_text.strip()
                 }
             ]
-        })
+        }
 
     if name == "batch_evaluate":
         reactions = arguments.get("reactions", [])
@@ -322,14 +322,14 @@ Interpretation:
             result_text += f"   Plausible: {result['is_plausible']} (Confidence: {result['confidence']})\n"
             result_text += "\n"
 
-        return CallToolResult.model_validate({
+        return {
             "content": [
                 {
                     "type": "text",
                     "text": result_text.strip()
                 }
             ]
-        })
+        }
 
     raise ValueError(f"Unknown tool: {name}")
 
