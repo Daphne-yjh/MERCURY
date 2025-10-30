@@ -4,6 +4,7 @@ appnope @ file:///home/conda/feedstock_root/build_artifacts/appnope_173333231862
 asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_1733250440834/work
 attrs @ file:///home/conda/feedstock_root/build_artifacts/attrs_1741918516150/work
 certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1754231422783/work/certifi
+charset-normalizer==3.4.4
 click @ file:///home/conda/feedstock_root/build_artifacts/click_1758270398201/work
 comm @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_comm_1753453984/work
 debugpy @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_debugpy_1758162064/work
@@ -44,6 +45,7 @@ platformdirs @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-bui
 prompt_toolkit @ file:///home/conda/feedstock_root/build_artifacts/prompt-toolkit_1756321756983/work
 psutil @ file:///Users/runner/miniforge3/conda-bld/psutil_1758169357574/work
 ptyprocess @ file:///home/conda/feedstock_root/build_artifacts/ptyprocess_1733302279685/work/dist/ptyprocess-0.7.0-py2.py3-none-any.whl#sha256=92c32ff62b5fd8cf325bec5ab90d7be3d2a8ca8c8a3813ff487a8d2002630d1f
+PubChemPy==1.0.5
 pure_eval @ file:///home/conda/feedstock_root/build_artifacts/pure_eval_1733569405015/work
 pydantic @ file:///home/conda/feedstock_root/build_artifacts/pydantic_1757881615017/work
 pydantic-settings @ file:///home/conda/feedstock_root/build_artifacts/pydantic-settings_1750801564484/work
@@ -56,6 +58,7 @@ pytz==2025.2
 pyzmq @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_pyzmq_1757387159/work
 rdkit-pypi==2022.9.5
 referencing @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_referencing_1737836872/work
+requests==2.32.5
 rich @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_rich_1753436991/work/dist
 rpds-py @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_rpds-py_1756737586/work
 six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
@@ -68,6 +71,7 @@ traitlets @ file:///home/conda/feedstock_root/build_artifacts/traitlets_17333673
 typing-inspection @ file:///home/conda/feedstock_root/build_artifacts/typing-inspection_1747870647094/work
 typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1756220668/work
 tzdata==2025.2
+urllib3==2.5.0
 uvicorn @ file:///home/conda/feedstock_root/build_artifacts/uvicorn_1758365836766/work
 wcwidth @ file:///home/conda/feedstock_root/build_artifacts/wcwidth_1758622279606/work
 zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1749421620841/work
