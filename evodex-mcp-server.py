@@ -27,6 +27,12 @@ from mcp.types import (
 # EVODEX imports
 from evodex.evaluation import assign_evodex_F, match_operators
 
+# Additional imports for SMILES lookup
+import requests
+import json
+import time
+import pubchempy as pcp
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -41,11 +47,12 @@ server = Server("evodex-mcp-server")
 @dataclass
 class ReactionResult:
     """Data class for reaction evaluation results"""
-    reaction: str
-    evodex_f_id: Optional[str]
-    matched_operators: List[str]
-    is_plausible: bool
-    confidence: str
+    substrate_name: str
+    product_name: str
+    substrate_smiles: str
+    product_smiles: str
+    matches: List[Dict[str, str]]
+    conclusion: str
 
 class EVODEXEvaluator:
     """Main class for EVODEX evaluation functionality"""
@@ -54,74 +61,217 @@ class EVODEXEvaluator:
         self.logger = logging.getLogger("evodex_evaluator")
         self.logger.info("EVODEX Evaluator initialized")
     
-    def assign_evodex_f(self, reaction: str) -> Optional[str]:
+    def get_smiles_pubchem(self, name: str) -> Optional[str]:
         """
-        Calculate formula difference and assign EVODEX-F ID if it exists.
+        Get SMILES using PubChemPy library.
         
         Args:
-            reaction: Reaction SMILES string in format "substrate>>product"
+            name: Name of the compound
             
         Returns:
-            EVODEX-F ID if found, None otherwise
+            SMILES string if found, None otherwise
         """
-        self.logger.info(f"Evaluating reaction with assign_evodex_F: {reaction}")
-        result = assign_evodex_F(reaction)
-        self.logger.info(f"assign_evodex_F result: {result}")
-        return result
+        try:
+            smiles = pcp.get_compounds(name, 'name')
+            if smiles:
+                self.logger.info(f"Found SMILES via PubChem for {name}")
+                return smiles[0].isomeric_smiles
+            return None
+        except Exception as e:
+            self.logger.debug(f"PubChem lookup failed for {name}: {e}")
+            return None
     
-    def match_operators(self, reaction: str, operator_type: str = 'E') -> List[str]:
+    def get_smiles_cactus(self, structure_identifier: str) -> Optional[str]:
         """
-        Match reaction operators against EVODEX datasets.
+        Get SMILES using CACTUS Chemical Identifier Resolver.
         
         Args:
-            reaction: Reaction SMILES string in format "substrate>>product"
-            operator_type: Type of operator to match ('E', 'C', or 'N')
+            structure_identifier: Name of the compound
             
         Returns:
-            List of matched operator IDs
+            SMILES string if found, None otherwise
         """
-        self.logger.info(f"Evaluating reaction with match_operators: {reaction}, type: {operator_type}")
-        result = match_operators(reaction, operator_type)
-        self.logger.info(f"match_operators result: {result}")
-        return result
+        try:
+            url = f"https://cactus.nci.nih.gov/chemical/structure/{structure_identifier}/smiles"
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                smiles = response.text.strip()
+                if smiles and not smiles.startswith('Error'):
+                    self.logger.info(f"Found SMILES via CACTUS for {structure_identifier}")
+                    return smiles
+            return None
+        except Exception as e:
+            self.logger.debug(f"CACTUS lookup failed for {structure_identifier}: {e}")
+            return None
     
-    def evaluate_reaction(self, reaction: str, operator_type: str = 'E') -> ReactionResult:
+    def get_smiles_chemspider(self, name: str) -> Optional[str]:
         """
-        Comprehensive reaction evaluation combining both EVODEX methods.
+        Get SMILES using ChemSpider API.
         
         Args:
-            reaction: Reaction SMILES string in format "substrate>>product"
-            operator_type: Type of operator to match ('E', 'C', or 'N')
+            name: Name of the compound
+            
+        Returns:
+            SMILES string if found, None otherwise
+        """
+        api_key = 'a2J8YBbT3n7JsymaHfisErAyKjDHQP2A'
+        search_url = f'https://api.rsc.org/compounds/v1/filter/name/'
+        headers = {'apikey': api_key}
+        
+        try:
+            data = {'name': name}
+            json_data = json.dumps(data)
+            response = requests.post(search_url, headers=headers, data=json_data, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            csid = data['queryId']
+            
+            # Give the server time to load the query
+            time.sleep(1)
+            
+            details_url = f'https://api.rsc.org/compounds/v1/filter/{csid}/results'
+            response = requests.get(details_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            results = data['results'][0]
+            details_url = f'https://api.rsc.org/compounds/v1/records/{results}/details?fields=SMILES'
+            response = requests.get(details_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            smiles = data.get('smiles')
+            if smiles:
+                self.logger.info(f"Found SMILES via ChemSpider for {name}")
+            return smiles
+            
+        except Exception as e:
+            self.logger.debug(f"ChemSpider lookup failed for {name}: {e}")
+            return None
+    
+    def lookup_smiles(self, compound_name: str) -> Optional[str]:
+        """
+        Look up SMILES string for a compound name using multiple sources.
+        Tries PubChem, then CACTUS, then ChemSpider in sequence.
+        
+        Args:
+            compound_name: Name of the compound
+            
+        Returns:
+            SMILES string if found, None otherwise
+        """
+        # Try PubChem first
+        smiles = self.get_smiles_pubchem(compound_name)
+        if smiles:
+            return smiles
+        
+        # Try CACTUS
+        smiles = self.get_smiles_cactus(compound_name)
+        if smiles:
+            return smiles
+        
+        # Try ChemSpider
+        smiles = self.get_smiles_chemspider(compound_name)
+        if smiles:
+            return smiles
+        
+        self.logger.warning(f"Could not find SMILES for compound: {compound_name}")
+        return None
+    
+    def evaluate_reaction(self, substrate_name: str, product_name: str) -> ReactionResult:
+        """
+        Evaluate a reaction based on substrate and product names,
+        returning details and matching results from EVODEX.
+        
+        Args:
+            substrate_name: Name of the substrate compound
+            product_name: Name of the product compound
             
         Returns:
             ReactionResult object with comprehensive evaluation
         """
-        # Get EVODEX-F assignment
-        f_id = self.assign_evodex_f(reaction)
-
-        # Get matched operators
-        matched_ops = self.match_operators(reaction, operator_type)
-
-        # Determine plausibility
-        is_plausible = f_id is not None or len(matched_ops) > 0
-
-        # Determine confidence level
-        if f_id and len(matched_ops) > 0:
-            confidence = "High"
-        elif f_id or len(matched_ops) > 0:
-            confidence = "Medium"
-        else:
-            confidence = "Low"
-
+        self.logger.info(f"Evaluating reaction: {substrate_name} -> {product_name}")
+        
+        # Initialize result object
         result = ReactionResult(
-            reaction=reaction,
-            evodex_f_id=f_id,
-            matched_operators=matched_ops,
-            is_plausible=is_plausible,
-            confidence=confidence
+            substrate_name=substrate_name,
+            product_name=product_name,
+            substrate_smiles="",
+            product_smiles="",
+            matches=[],
+            conclusion=""
         )
-
-        self.logger.info(f"Evaluation complete: {result}")
+        
+        # Look up SMILES for substrate
+        substrate_smiles = self.lookup_smiles(substrate_name)
+        if not substrate_smiles:
+            result.conclusion = "Could not resolve substrate to SMILES"
+            return result
+        result.substrate_smiles = substrate_smiles
+        
+        # Look up SMILES for product
+        product_smiles = self.lookup_smiles(product_name)
+        if not product_smiles:
+            result.conclusion = "Could not resolve product to SMILES"
+            return result
+        result.product_smiles = product_smiles
+        
+        # Create reaction SMILES
+        reaction_smiles = f"{substrate_smiles}>>{product_smiles}"
+        
+        # Run EVODEX evaluation at different abstraction levels
+        # Check F level (formula difference)
+        f_id = assign_evodex_F(reaction_smiles)
+        
+        if not f_id:
+            result.conclusion = "No match found to any known enzymatic reactions"
+            return result
+        
+        # Check C level (chemical)
+        c_matches = match_operators(reaction_smiles, 'C')
+        if not c_matches:
+            result.conclusion = "The reaction has precedent with other reactions with a similar formula difference, but the specific mechanism is unprecedented"
+            # Add F match to results
+            result.matches.append({"evodex_id": f_id})
+            return result
+        
+        # Check N level (natural)
+        n_matches = match_operators(reaction_smiles, 'N')
+        if not n_matches:
+            result.conclusion = "The reaction has precedent with other reactions sharing similar reactive groups, but the specific mechanism is unprecedented"
+            # Add F and C matches to results
+            result.matches.append({"evodex_id": f_id})
+            for match in c_matches:
+                result.matches.append({"evodex_id": match})
+            return result
+        
+        # Check E level (enzymatic)
+        e_matches = match_operators(reaction_smiles, 'E')
+        if not e_matches:
+            result.conclusion = "The reaction matches known reaction mechanisms partially but not the entire electronic manifold is present."
+            # Add all previous matches to results
+            result.matches.append({"evodex_id": f_id})
+            for match in c_matches:
+                result.matches.append({"evodex_id": match})
+            for match in n_matches:
+                result.matches.append({"evodex_id": match})
+            return result
+        
+        # If we got here, we have an E match
+        result.conclusion = f"Full enzymatic match found with {len(e_matches)} mechanism(s)"
+        
+        # Add all matches to results
+        result.matches.append({"evodex_id": f_id})
+        for match in c_matches:
+            result.matches.append({"evodex_id": match})
+        for match in n_matches:
+            result.matches.append({"evodex_id": match})
+        for match in e_matches:
+            result.matches.append({"evodex_id": match})
+        
+        self.logger.info(f"Evaluation complete: {result.conclusion}")
         return result
 
 # Initialize evaluator
@@ -132,80 +282,21 @@ async def handle_list_tools() -> List[Tool]:
     """List available EVODEX tools"""
     return [
         Tool(
-            name="assign_evodex_f",
-            description="Calculate formula difference and assign EVODEX-F ID for a reaction",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "reaction": {
-                        "type": "string",
-                        "description": "Reaction SMILES string in format 'substrate>>product'"
-                    }
-                },
-                "required": ["reaction"]
-            }
-        ),
-        Tool(
-            name="match_operators",
-            description="Match reaction operators against EVODEX datasets (E, C, or N)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "reaction": {
-                        "type": "string",
-                        "description": "Reaction SMILES string in format 'substrate>>product'"
-                    },
-                    "operator_type": {
-                        "type": "string",
-                        "description": "Type of operator to match: 'E' (enzymatic), 'C' (chemical), or 'N' (natural)",
-                        "default": "E",
-                        "enum": ["E", "C", "N"]
-                    }
-                },
-                "required": ["reaction"]
-            }
-        ),
-        Tool(
             name="evaluate_reaction",
-            description="Comprehensive reaction evaluation combining both EVODEX methods",
+            description="Evaluate a reaction based on substrate and product names, returning EVODEX matches and conclusions",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "reaction": {
+                    "substrate_name": {
                         "type": "string",
-                        "description": "Reaction SMILES string in format 'substrate>>product'"
+                        "description": "Name of the substrate compound"
                     },
-                    "operator_type": {
+                    "product_name": {
                         "type": "string",
-                        "description": "Type of operator to match: 'E' (enzymatic), 'C' (chemical), or 'N' (natural)",
-                        "default": "E",
-                        "enum": ["E", "C", "N"]
+                        "description": "Name of the product compound"
                     }
                 },
-                "required": ["reaction"]
-            }
-        ),
-        Tool(
-            name="batch_evaluate",
-            description="Evaluate multiple reactions in batch",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "reactions": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "List of reaction SMILES strings"
-                    },
-                    "operator_type": {
-                        "type": "string",
-                        "description": "Type of operator to match: 'E' (enzymatic), 'C' (chemical), or 'N' (natural)",
-                        "default": "E",
-                        "enum": ["E", "C", "N"]
-                    }
-                },
-                "required": ["reactions"]
+                "required": ["substrate_name", "product_name"]
             }
         )
     ]
@@ -215,60 +306,25 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResu
     """Handle tool calls"""
     logger.info(f"Tool call: {name} with arguments: {arguments}")
 
-    if name == "assign_evodex_f":
-        reaction = arguments.get("reaction")
-        if not reaction:
-            raise ValueError("Reaction parameter is required")
-
-        result = evaluator.assign_evodex_f(reaction)
-
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"EVODEX-F ID: {result if result else 'No match found'}\n\nReaction: {reaction}"
-                }
-            ]
-        }
-
-    if name == "match_operators":
-        reaction = arguments.get("reaction")
-        operator_type = arguments.get("operator_type", "E")
-
-        if not reaction:
-            raise ValueError("Reaction parameter is required")
-
-        result = evaluator.match_operators(reaction, operator_type)
-
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Matched Operators ({operator_type}): {result if result else 'No matches found'}\n\nReaction: {reaction}"
-                }
-            ]
-        }
-
     if name == "evaluate_reaction":
-        reaction = arguments.get("reaction")
-        operator_type = arguments.get("operator_type", "E")
+        substrate_name = arguments.get("substrate_name")
+        product_name = arguments.get("product_name")
 
-        if not reaction:
-            raise ValueError("Reaction parameter is required")
+        if not substrate_name or not product_name:
+            raise ValueError("Both substrate_name and product_name parameters are required")
 
-        result = evaluator.evaluate_reaction(reaction, operator_type)
+        result = evaluator.evaluate_reaction(substrate_name, product_name)
 
-        # Format comprehensive result
+        # Format result as JSON-like object
         result_text = f"""
-================================
-
-Reaction: {result.reaction}
-EVODEX-F ID: {result.evodex_f_id if result.evodex_f_id else 'No match'}
-Matched Operators ({operator_type}): {result.matched_operators if result.matched_operators else 'No matches'}
-Is Plausible: {result.is_plausible}
-Confidence: {result.confidence}
-
-================================
+{{
+  "substrate_name": "{result.substrate_name}",
+  "product_name": "{result.product_name}",
+  "substrate_smiles": "{result.substrate_smiles}",
+  "product_smiles": "{result.product_smiles}",
+  "matches": {json.dumps(result.matches, indent=4)},
+  "conclusion": "{result.conclusion}"
+}}
 """
 
         return {
@@ -276,44 +332,6 @@ Confidence: {result.confidence}
                 {
                     "type": "text",
                     "text": result_text
-                }
-            ]
-        }
-
-    if name == "batch_evaluate":
-        reactions = arguments.get("reactions", [])
-        operator_type = arguments.get("operator_type", "E")
-
-        if not reactions:
-            raise ValueError("Reactions parameter is required")
-
-        results = []
-        for reaction in reactions:
-            result = evaluator.evaluate_reaction(reaction, operator_type)
-            results.append({
-                "reaction": result.reaction,
-                "evodex_f_id": result.evodex_f_id,
-                "matched_operators": result.matched_operators,
-                "is_plausible": result.is_plausible,
-                "confidence": result.confidence
-            })
-
-        # Format batch results
-        result_text = f"Batch Evaluation Results ({len(reactions)} reactions)\n"
-        result_text += "=" * 50 + "\n\n"
-
-        for i, result in enumerate(results, 1):
-            result_text += f"{i}. {result['reaction']}\n"
-            result_text += f"   EVODEX-F: {result['evodex_f_id'] or 'No match'}\n"
-            result_text += f"   Operators: {result['matched_operators'] or 'No matches'}\n"
-            result_text += f"   Plausible: {result['is_plausible']} (Confidence: {result['confidence']})\n"
-            result_text += "\n"
-
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": result_text.strip()
                 }
             ]
         }
