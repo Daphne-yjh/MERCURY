@@ -60,38 +60,55 @@ class QwenMCPAgent:
         """Initialize MCP connection and discover available tools"""
         print("Connecting to EVODEX MCP Server...")
         
-        # Start MCP server connection
-        params = StdioServerParameters(
-            command="python",
-            args=["evodex-mcp-server.py"]
-        )
-        
-        # Create MCP client session
-        self.io_streams = await stdio_client(params).__aenter__()
-        self.mcp_session = await ClientSession(*self.io_streams).__aenter__()
-        await self.mcp_session.initialize()
-        
-        # Discover available tools from MCP server
-        tools_result = await self.mcp_session.list_tools()
-        self.mcp_tools = [
-            {
-                'name': tool.name,
-                'description': tool.description,
-                'parameters': tool.inputSchema
-            }
-            for tool in tools_result.tools
-        ]
-        
-        print(f"Connected! Available tools: {[t['name'] for t in self.mcp_tools]}")
-        
-        # Initialize Qwen Agent with function calling
-        self.agent = Assistant(
-            llm=self.model_config,
-            system_message=SYSTEM_PROMPT,
-            function_list=self._convert_tools_for_qwen()
-        )
-        
-        print("Qwen Agent initialized and ready!")
+        try:
+            # Start MCP server connection
+            params = StdioServerParameters(
+                command="python",
+                args=["evodex-mcp-server.py"]
+            )
+            
+            # Create and enter stdio context
+            self._stdio_context = stdio_client(params)
+            read_stream, write_stream = await self._stdio_context.__aenter__()
+            
+            # Create and enter session context
+            self._session_context = ClientSession(read_stream, write_stream)
+            self.mcp_session = await self._session_context.__aenter__()
+            
+            # Initialize the session
+            await self.mcp_session.initialize()
+            
+            # Discover available tools from MCP server
+            tools_result = await self.mcp_session.list_tools()
+            self.mcp_tools = [
+                {
+                    'name': tool.name,
+                    'description': tool.description,
+                    'parameters': tool.inputSchema
+                }
+                for tool in tools_result.tools
+            ]
+            
+            print(f"Connected! Available tools: {[t['name'] for t in self.mcp_tools]}")
+            
+            # Load the LLM model
+            print("\nLoading Qwen model...")
+            llm = get_chat_model(self.model_config)
+            print("✓ Model loaded")
+            
+            # Initialize Qwen Agent with function calling
+            self.agent = Assistant(
+                llm=llm,  # ← Use loaded model, not config dict
+                system_message=SYSTEM_PROMPT,
+                function_list=self._convert_tools_for_qwen()
+            )
+            
+            print("Qwen Agent initialized and ready!")
+            
+        except Exception as e:
+            print(f"Error during initialization: {e}")
+            await self.close()  # Clean up on error
+            raise
         
     def _convert_tools_for_qwen(self) -> List[Dict]:
         """
@@ -203,10 +220,23 @@ class QwenMCPAgent:
     
     async def close(self):
         """Clean up MCP connection"""
-        if self.mcp_session:
-            await self.mcp_session.__aexit__(None, None, None)
-            await self.io_streams.__aexit__(None, None, None)
-            print("MCP connection closed")
+        print("Closing MCP connection...")
+        
+        # Exit session context
+        if self._session_context:
+            try:
+                await self._session_context.__aexit__(None, None, None)
+            except Exception as e:
+                print(f"Warning: Error closing session: {e}")
+        
+        # Exit stdio context
+        if self._stdio_context:
+            try:
+                await self._stdio_context.__aexit__(None, None, None)
+            except Exception as e:
+                print(f"Warning: Error closing stdio: {e}")
+        
+        print("MCP connection closed")
 
 
 async def main():
