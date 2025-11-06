@@ -5,6 +5,7 @@ Simple test of Qwen Agent with direct tool calls (no full LLM yet)
 
 import asyncio
 from qwen_agent_mcp import QwenMCPAgent
+import json
 
 
 async def test_direct_validation():
@@ -23,7 +24,9 @@ async def test_direct_validation():
             {"reaction": test_reaction, "operator_type": "E"}
         )
         
-        print(f"\nDirect tool result:\n{result}")
+        result_dict = json.loads(result)
+        result_text = result_dict['content'][0]['text']
+        print(f"\nDirect tool result:\n{result_text}")
         
     finally:
         await agent.close()
