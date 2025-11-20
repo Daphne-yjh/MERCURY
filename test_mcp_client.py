@@ -1,44 +1,63 @@
 """Test the EVODEX MCP server by calling tools via the MCP client API."""
 
 import asyncio
-from typing import List
+import json
+from typing import List, Tuple
 
 import mcp.types as types
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
-# Reactions for testing: 5 valid and 5 invalid
-VALID_REACTIONS: List[str] = [
-    "CCCO>>CCC=O",  # propanol >> propanal, alcohol oxidation
-    "C([C@@H](C(=O)O)N)O>>C([C@@H](C(=O)O)N)=O",  # serine >> oxo-serine, amino acid oxidation
-    "CCCO>>CCCOC",  # propanol >> propyl methyl ether, etherification
-    "CCO>>CC=O",  # ethanol >> ethanal, alcohol oxidation
-    "CCCCO>>CCCC=O",  # butanol >> butanal, alcohol oxidation
+# Test reactions: tuples of (substrate_name, product_name, description)
+# Valid enzymatic reactions
+VALID_REACTIONS: List[Tuple[str, str, str]] = [
+    ("propanol", "propanal", "Alcohol oxidation"),
+    ("serine", "oxoserine", "Amino acid oxidation"),
+    ("ethanol", "acetaldehyde", "Alcohol oxidation"),
+    ("butanol", "butanal", "Alcohol oxidation"),
+    ("glucose", "gluconic acid", "Sugar oxidation"),
 ]
 
-INVALID_REACTIONS: List[str] = [
-    "CCCO>>CC(Br)CO",  # propanol >> brominated propanol, halogenation (not enzymatic)
-    "C([C@@H](C(=O)O)N)O>>CCCO",  # serine >> propanol, invalid major structural change
-    "CC=CCO>>CCCC",  # butenol >> butane, hydrogenation with carbon chain change (not enzymatic)
-    "CCO>>CC(Br)O",  # ethanol >> brominated ethanol, halogenation (not enzymatic)
-    "CCO>>CCCC",  # ethanol >> butane, invalid major carbon chain change
+# Invalid or non-enzymatic reactions
+INVALID_REACTIONS: List[Tuple[str, str, str]] = [
+    ("propanol", "1-bromopropane", "Halogenation (not enzymatic)"),
+    ("serine", "propanol", "Invalid major structural change"),
+    ("ethanol", "bromoethane", "Halogenation (not enzymatic)"),
+    ("ethanol", "butane", "Invalid major carbon chain change"),
+    ("benzene", "cyclohexane", "Aromatic reduction (not typical enzymatic)"),
 ]
 
 
-def summarize_result(result: types.CallToolResult) -> str:
-    """Extract and return only the text content from the result."""
-    import json
-    
-    # The MCP framework wraps our dictionary responses in CallToolResult objects
-    # where the text field contains the JSON string representation
+def format_result(result: types.CallToolResult) -> str:
+    """Extract and format the JSON result from the MCP response."""
     parts: List[str] = []
     for content in result.content:
         if hasattr(content, "text") and content.text:
-            # Parse the JSON string to extract the actual text content
-            json_data = json.loads(content.text)
-            for item in json_data["content"]:
-                parts.append(item["text"])
+            try:
+                # The server returns a JSON string in the text field
+                # First parse the outer structure
+                outer_json = json.loads(content.text.strip())
+                
+                # If it's nested with a "content" field, extract the inner text
+                if isinstance(outer_json, dict) and "content" in outer_json:
+                    for item in outer_json["content"]:
+                        if isinstance(item, dict) and "text" in item:
+                            inner_text = item["text"]
+                            # Try to parse the inner text as JSON
+                            try:
+                                inner_json = json.loads(inner_text.strip())
+                                formatted = json.dumps(inner_json, indent=2)
+                                parts.append(formatted)
+                            except json.JSONDecodeError:
+                                parts.append(inner_text)
+                else:
+                    # Direct JSON, format it nicely
+                    formatted = json.dumps(outer_json, indent=2)
+                    parts.append(formatted)
+            except json.JSONDecodeError:
+                # If it's not valid JSON, just return the text
+                parts.append(content.text)
     
     return "\n".join(parts) if parts else "<no text content>"
 
@@ -51,21 +70,58 @@ async def run_tests() -> None:
         async with ClientSession(*io_streams) as session:
             await session.initialize()
 
+            # List available tools
             tools_result = await session.list_tools()
             available_tools = [tool.name for tool in tools_result.tools]
+            print("=" * 80)
             print("Available tools:", ", ".join(available_tools))
+            print("=" * 80)
 
-            print("\nValid reactions:")
-            for reaction in VALID_REACTIONS:
-                result = await session.call_tool("evaluate_reaction", {"reaction": reaction, "operator_type": "E"})
-                print(summarize_result(result))
+            # Test valid reactions
+            print("\n" + "=" * 80)
+            print("TESTING VALID ENZYMATIC REACTIONS")
+            print("=" * 80)
+            for i, (substrate, product, description) in enumerate(VALID_REACTIONS, 1):
+                print(f"\n[Test {i}] {description}")
+                print(f"Substrate: {substrate} -> Product: {product}")
+                print("-" * 80)
+                try:
+                    result = await session.call_tool(
+                        "evaluate_reaction",
+                        {
+                            "substrate_name": substrate,
+                            "product_name": product
+                        }
+                    )
+                    print(format_result(result))
+                except Exception as e:
+                    print(f"ERROR: {e}")
                 print()
 
-            print("Invalid reactions:")
-            for reaction in INVALID_REACTIONS:
-                result = await session.call_tool("evaluate_reaction", {"reaction": reaction, "operator_type": "E"})
-                print(summarize_result(result))
+            # Test invalid reactions
+            print("\n" + "=" * 80)
+            print("TESTING INVALID/NON-ENZYMATIC REACTIONS")
+            print("=" * 80)
+            for i, (substrate, product, description) in enumerate(INVALID_REACTIONS, 1):
+                print(f"\n[Test {i}] {description}")
+                print(f"Substrate: {substrate} -> Product: {product}")
+                print("-" * 80)
+                try:
+                    result = await session.call_tool(
+                        "evaluate_reaction",
+                        {
+                            "substrate_name": substrate,
+                            "product_name": product
+                        }
+                    )
+                    print(format_result(result))
+                except Exception as e:
+                    print(f"ERROR: {e}")
                 print()
+
+            print("=" * 80)
+            print("Testing complete!")
+            print("=" * 80)
 
 
 def main() -> None:
