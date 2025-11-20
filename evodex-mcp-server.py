@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
-from mcp.server import Server
+from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import (
@@ -351,7 +351,7 @@ async def main():
                 server_name="evodex-mcp-server",
                 server_version="1.0.0",
                 capabilities=server.get_capabilities(
-                    notification_options=server.notification_options,
+                    notification_options=NotificationOptions(),
                     experimental_capabilities={},
                 ),
             ),
